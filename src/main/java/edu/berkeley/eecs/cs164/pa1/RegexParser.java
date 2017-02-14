@@ -12,7 +12,7 @@ public class RegexParser {
     /*
     Grammar:
     expr -> term ('|' term)*
-    term -> factor+ | epsilon
+    term -> factor*
     factor -> atom'*'|atom'?'|atom'+'|atom
     atom -> any character besides "()?|+*"
     atom -> "(" expr ")"
@@ -39,13 +39,15 @@ public class RegexParser {
     public static Automaton parse(String pattern) {
         pos = 0;
         input = pattern.toCharArray();
-        // put the first character(s) into the holder, and then advance pos for the next call to advance
+
+        // put the first character(s) into the holder, and then advance pos for the next
+        // call to advance
         advance();
+        
         Automaton completeNFA = expr();
         if (pos < input.length) {
             throw new RegexParseException("Parsing failed to process entire input string.");
         }
-        System.out.print(completeNFA.toString());
         return completeNFA;
     }
 
@@ -85,12 +87,8 @@ public class RegexParser {
         AutomatonState exprStart = new AutomatonState();
         AutomatonState exprOut = new AutomatonState();
 
-
         // get our first term NFA starting at the first character that expr can apply to
         Automaton termNFA = term();
-    
-        // advance past whatever term ended at (which might be "|")
-        advance();
     
         // allow our in progress NFA to transition into our term NFA and allow that NFA
         // to transition out into our out state
@@ -101,7 +99,7 @@ public class RegexParser {
         // operator
         while (token == '|') {
 
-            //advance past "|" to the characters term can apply to
+            //advance past "|" to the character(s) term can apply to
             advance();
 
             // get a new term NFA for whatever comes after '|'
@@ -111,79 +109,58 @@ public class RegexParser {
             exprStart.addEpsilonTransition(newTerm.getStart());
             newTerm.getOut().addEpsilonTransition(exprOut);
 
-            // advance to our next character in the sequence to see it it's "|"
-            advance();
         }
+
+        
 
         // once all the possible alternatives have been made enterable from our start
         // state and exitable into our out state, create a new NFA and return it
         return new Automaton(exprStart, exprOut);
     }
 
-    // the term operator does one of 2 things:
-    // Either it generates a daisy chain of NFAs to implement concatenation.
-    // OR else, if the above generates an error because it doesn't work,
-    // it generates a null NFA where the start and end are the same state
+    // the term operator generates a daisy chain of NFAs to implement concatenation.
+    // this chain can be have 0 or more transitons
     private static Automaton term() {
-        // create a start state for our in-progress NFA (we do not need to create
-        // an out state as one will be made for us)
-        AutomatonState termStart = new AutomatonState();
+        // We will need 3 states to create our term chain, a start state, an initial out
+        // state and a current out state, which can be updated as we get more factors to
+        // chain together.
+        AutomatonState startState = new AutomatonState();
+        AutomatonState initialout = new AutomatonState();;
+        AutomatonState currentOut = initialout;
 
-        // try to create a foncatenated chain of factor NFAs, which may fail.
-        // we will need be able to reset the parsing in the event that this
-        // term was actually meant to go to epsilon
-        int oldPos = pos;
-        char oldToken = token;
-        char oldToken2 = token2;
-        try{
+        // we will connect together our start state and initial out state with an epsilon
+        // transition in case we aren't actually matching anything in this term
+        startState.addEpsilonTransition(initialout);
 
-            // our term NFA will consist of 1 or more factor NFAs chained together, so we
-            // need to create the first one outside any loob
+        // check to see if we can actually put anything in the nfa
+        if (token == ')' || token == '|' || token == 0) {
+            return new Automaton(startState, currentOut);
+        }
+
+        // we will loop through the input until we find a symbol that indicates the end
+        // of our current term ("|" or ")") or the end of the input
+        while (true) {
+
+            // advance the token into the first character in factor
+            // we will create a new NFA from whatever we are currently looking at
             Automaton newFactor = factor();
 
-            // we will advance to the token we need to look at to create our factor NFA
-            advance();
+            // we will then place newFactor at the end of our current chain of factors
+            currentOut.addEpsilonTransition(newFactor.getStart());
 
-            // we will connect the new factor to our start state via an epsilon transition
-            termStart.addEpsilonTransition(newFactor.getStart());
+            // having added a new term to our chain, we will now update it to be our new
+            // outstate
+            currentOut = newFactor.getOut();
 
-            // in order to concatentate properly, we will need to know what the current end
-            // of our chain of concatenated NFAs is. To do this, we will need a outState
-            // container for our latest NFA
-            AutomatonState outHolder = newFactor.getOut();
+            // advance out token to either the end of factor (and possibly input), or the
+            // next factor to be created
+            //advance();
 
-            // since term is always part of an expr, the only characters that can signal the
-            // end of a term are "|" (if term is part of an alternation series), ")" (
-            // if expr is itself a nested expression coming from atom), or the end of the input
-            // if our factor has consumed the whole regex
-            while (token != ')' && token != '|' && token != 0) {
-                // create a factor NFA
-                newFactor = factor();
-
-                // advance the input to allow the next NFA to be created
-                advance();
-
-                // concatentate our new factor to the end of our NFA chain
-                outHolder.addEpsilonTransition(newFactor.getStart());
-
-                // make newFactor's out state the new outHolder
-                outHolder = newFactor.getOut();
-
+            // check if our new token indicates that we are done making factors
+            if(token == ')' || token == '|' || token == 0) {
+                // having chained together our terms, we can now return a valid term NFA
+                return new Automaton(startState, currentOut);
             }
-
-            // once we have hit a termination character for term, we can construct our NFA
-            return new Automaton(termStart, outHolder);
-        }
-        // if concatenation was the incorrect production to use for this term
-        // we will backtrack and instead give an epsilon NFA
-        catch (RegexParseException e) {
-            pos = oldPos;
-            token = oldToken;
-            token2 = oldToken2;
-
-            // Since we want our NFA to essentially do nothing, we can just return an
-            // NFA where the start and out state are the same automton state
-            return new Automaton(termStart, termStart);
         }
     }
 
@@ -191,10 +168,8 @@ public class RegexParser {
     // operations by adding extra epsilon transitions, or else just returning the atom
     // if the next token is not one of said quanifier characters
     private static Automaton factor() {
-        // create the atom NFA and then advance to the next token to figure out what, if
-        // anything should be done to that NFA
+        // create the atom NFA
         Automaton atomNFA = atom();
-        advance();
 
         // create start and out states to control the flow into or past the atom
         AutomatonState factorStart = new AutomatonState();
@@ -216,6 +191,8 @@ public class RegexParser {
 
             // with the necessary transitions to allow for 0 or more consecutive atom checks
             // we can create and return our NFA
+            // We will also advance our input for the next operation
+            advance();
             return new Automaton(factorStart, factorOut);
         }
 
@@ -235,6 +212,8 @@ public class RegexParser {
 
             // with the necessary transitions to allow for 1 or more consecutive atom checks
             // we can create and return our NFA
+            // We will also advance our input for the next operation
+            advance();
             return new Automaton(factorStart, factorOut);
 
         }
@@ -250,9 +229,14 @@ public class RegexParser {
             // Having added the transition to allow us to skip matching atom, atom now
             // implements the "?" quantifier (we could technically cut out factorstart/out
             // for + and * as well, but I think keeping them makes it cleaner to read)
+            // We will also advance our input for the next operation
+            advance();
             return atomNFA;
         }
+
+
         // if the character after atom is not one of the quantifiers, then we can just return atom
+        // we also avoid advancing as we are likely currently on a new atom or other Non-terminal's input
         else {
             return atomNFA;
         }
@@ -261,60 +245,79 @@ public class RegexParser {
     // this function should either make a parenthesized expr or make a 2 state NFA with a non-epsilon
     // transition, assuming that the input is in our grammar
     private static Automaton atom() {
-        // if the first character atom looks at is a (
+        // if the first character atom looks at is a (, then we are dealing with a neted expression
+        // and will need to construct a new expr
         if (token == '(') {
-            // create our expr NFA and then advance to our next term
-            Automaton returnNFA = expr();
+
+            // advance our token the first character in expr
             advance();
 
-            // check to make sure that our NFA is properly closed upon
+            // try to create our expr
+            Automaton exprNFA = expr();
+
             match(')');
-            return returnNFA;
+
+            // if the match succeeds, then we have a valid nest expression and we can return the automaton
+            return exprNFA;  
 
         // check to make sure that our current token is non-special character (i.e. it is not a
         // quantifier alternator, or an nested expression closer). Note that a nested expression
         // opener "(" is not allowed either, but will always be caught by the preceding conditional
-        } else if (token != '?' && token != '+' && token != '*' && token != ')' && token != '|') {
+        }
+        else if (token == '\\') {
+            // We are still performing a character match, just in a special case of a character, so we
+            // will need a start and out state
+            AutomatonState escapeStart = new AutomatonState();
+            AutomatonState escapeOut = new AutomatonState();
+    
+            // we need to check that the character following the escape is one of the permitted
+            // escape characters
+            if (token2 == 'n'){escapeStart.addTransition('\n', escapeOut);}
+            else if (token2 == 't') {escapeStart.addTransition('\t', escapeOut);}
+            else if (token2 == '|') {escapeStart.addTransition('|', escapeOut);}
+            else if (token2 == '(') {escapeStart.addTransition('(', escapeOut);}
+            else if (token2 == ')') {escapeStart.addTransition(')', escapeOut);}
+            else if (token2 == '*') {escapeStart.addTransition('*', escapeOut);}
+            else if (token2 == '+') {escapeStart.addTransition('+', escapeOut);}
+            else if (token2 == '?') {escapeStart.addTransition('?', escapeOut);}
+            else if(token2 == '\\') {escapeStart.addTransition('\\', escapeOut);}
+
+            // if the second character doesn't match one of the characters our grammar allows escaping for,
+            // then the regex must be malformed and we throw an error.
+            else {
+                throw new RegexParseException("Unexpected escape character: " + token + token2);
+            }
+            
+            // having proccessed our portion of input, we advance so the previous call is in its part
+            advance();
+
+            // Once we have added the appropriate escaped character transition, we return our completed NFA
+            return new Automaton(escapeStart, escapeOut);
+        }
+        // if the term our atom is looking at is a special operator, then we have likely misparsed somewhere
+        else if (token == '?' || token == '+' || token == '*' || token == ')' || token == '|') {
+
+            // if the current character is not an expression opener or a regular character (i.e. it is a nested
+            // expression closer ")" or one of the regex operators  *+?|), something has gone wrong. Either an
+            // invalid regular expression was given, or a term was expanded into a factor chain when it should
+            // have been an empty string 
+            throw new RegexParseException("Unexpected token: " + token + ". Expecting: a character or '('.");
+        }
+        // We haven't started off with a special character or misparsed at some point, then we should just make
+        // an NFA that matches the current chracter
+        else {
+
             // create 2 NFA states with a non-epsilon transition between them to match the character
             // expressed in the current pos on the input
             AutomatonState atomNFAStart = new AutomatonState();
             AutomatonState atomNFAOut = new AutomatonState();
             atomNFAStart.addTransition(token, atomNFAOut);
 
-            // if we aren't dealing with an escaped character, then we can just return the NFA with 2 states
-            if (token != '\\') {
-                return new Automaton(atomNFAStart, atomNFAOut);
-            }
-            // if the token is a \, it indicates that we are actually trying to match an escaped
-            // character and need to look at the next character in order to properly form our NFA
-            else {
-                // we need to check that the character following the escape is one of the permitted
-                // escape characters
-                if (token2 == 'n' || token2 == 't' || token2 == '|' || token2 == '(' || token2 == ')' ||
-                    token2 == '*' || token2 == '+' || token2 == '?' || token2 == '\\') {
+            // having processed our material here, we advance so the calling function is outside our stuff
+            advance();
 
-                    // create a new state to match to against the second piece of the escaped character
-                    AutomatonState escapeState = new AutomatonState();
-
-                    // add a transition from the atomNFAOut to the escape state
-                    atomNFAOut.addTransition(token2, escapeState);
-
-                    // return a 3 concatentated NFA
-                    return new Automaton(atomNFAStart, escapeState);
-                }
-                // if the second character doesn't match one of the characters our grammar allows escaping for,
-                // then the regex must be malformed and we throw an error.
-                else {
-                    throw new RegexParseException("Unexpected escape character: " + token + token2);
-                }
-            }
-        // if the current character is not an expression opener or a regular character (i.e. it is a nested
-        // expression closer ")" or one of the regex operators  *+?|), something has gone wrong. Either an
-        // invalid regular expression was given, or a term was expanded into a factor chain when it should
-        // have been an empty string 
-        } else {
-            throw new RegexParseException("Unexpected token: " + token + ". Expecting: a character or '('.");
+            // return an automaton
+            return new Automaton(atomNFAStart, atomNFAOut);
         }
     }
-
 }

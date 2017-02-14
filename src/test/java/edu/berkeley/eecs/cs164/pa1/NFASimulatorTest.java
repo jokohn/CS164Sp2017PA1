@@ -99,10 +99,25 @@ public class NFASimulatorTest {
         for (int n = 10; n <= 100; n += 10) {
             regex = "a?a?a?a?a?a?a?a?a?a?" + regex + "aaaaaaaaaa";
             input += "aaaaaaaaaa";
-            testCase(regex, input);
+	            testCase(regex, input);
             testCase(regex, input + input);
             testCase(regex, input + input + "a", false);
         }
+    }
+    
+    @Test
+    public void JoelsTests() throws Exception {
+    	testCase("(abc)*", "");
+        testCase("(abc)*", "abcabcabc");
+        testCase("(ab)+", "ab");
+        testCase("(ab|bc)", "ab");
+        testCase("(ab|bc)", "bc");
+        testCase("a*b*", "aaaaaaa");
+        testCase("((ab)+|ba)", "ababababab");
+        testCase("(((((((((((((a)))))))))))))", "a");
+        testCase("(a)(b)", "ab");
+        testCase("\\\\", "\\");
+        testCase("", "");
     }
 
 }

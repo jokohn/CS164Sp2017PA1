@@ -38,8 +38,8 @@ public class Automaton {
         builder.append("digraph G {\n");
         builder.append(String.format("\trankdir=LR;%n"));
         builder.append(String.format("\tinput [shape=none, label=\"start\"];%n"));
-        builder.append(String.format("\tinput -> s%d;%n", getStart().getMyId()));
-        builder.append(String.format("\ts%d [shape=doublecircle];%n", getOut().getMyId()));
+        builder.append(String.format("\tinput -> %s;%n", getStart()));
+        builder.append(String.format("\t%s [shape=doublecircle];%n", getOut()));
         printTraversal(getStart(), new HashSet<AutomatonState>(), builder);
         builder.append("}\n");
         return builder.toString();
@@ -51,8 +51,9 @@ public class Automaton {
             for (Map.Entry<Character, Set<AutomatonState>> entry : current.getAllTransitions()) {
                 for (AutomatonState target : entry.getValue()) {
                     String label = String.format("\"%s\"", entry.getKey() == null ? "&epsilon;" : entry.getKey());
+                    label = label.replace("\\", "\\\\");
                     printTraversal(target, visited, builder);
-                    builder.append(String.format("\ts%d -> s%d [label=%s];%n", current.getMyId(), target.getMyId(), label));
+                    builder.append(String.format("\t%s -> %s [label=%s];%n", current, target, label));
                 }
             }
         }
